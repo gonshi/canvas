@@ -1,32 +1,181 @@
 (function(global, doc, $, ns, undefined) {
+	'use strict';
+	ns = ns || {};
+
+	function EventDispatcher() {
+		this._events = {};
+	}
+
+	EventDispatcher.prototype.hasEventListener = function(eventName) {
+		return !!this._events[eventName];
+	};
+
+	EventDispatcher.prototype.addEventListener = function(eventName, callback) {
+		if (this.hasEventListener(eventName)) {
+			var events = this._events[eventName];
+      var i;
+      var eventsLength = events.length;
+			for ( i = 0; i < eventsLength; i++ ) {
+				if (events[i] === callback) {
+					return;
+				}
+			}
+			events.push(callback);
+		}
+		else{
+			this._events[eventName] = [callback];
+		}
+		return this;
+	};
+
+	EventDispatcher.prototype.removeEventListener = function(eventName, callback) {
+		if (!this.hasEventListener(eventName)) {
+			return;
+		}
+		else{
+			var events = this._events[eventName],
+					i      = events.length,
+					index;
+			while (i--) {
+				if (events[i] === callback) {
+					index = i;
+				}
+			}
+			events.splice(index, 1);
+		}
+		return this;
+	};
+
+	EventDispatcher.prototype.fireEvent = function(eventName, opt_this) {
+		if (!this.hasEventListener(eventName)) {
+			return;
+		}
+		else{
+			var events = this._events[eventName];
+      var i;
+      var eventsLength = events.length;
+			var copyEvents = $.merge([], events);
+			var arg        = $.merge([], arguments);
+			arg.splice(0, 2);
+			for ( i = 0; i < eventsLength; i++ ) {
+				copyEvents[i].apply(opt_this || this, arg);
+			}
+		}
+	};
+
+	ns.EventDispatcher = EventDispatcher;
+  global.canvasNamespace = ns;
+
+})(this, document, jQuery, this.canvasNamespace);
+
+(function(global, doc, $, ns, undefined) {
+  'use strict';
+  ns = ns || {};  
+
+  function Throttle(minInterval) {
+    this.interval = minInterval;
+    this.prevTime = 0;
+    this.timer = function(){};
+  }
+
+  Throttle.prototype.exec = function(callback) {
+    var now = + new Date(),
+        delta = now - this.prevTime;
+
+    clearTimeout(this.timer);
+    if( delta >= this.interval ){
+      this.prevTime = now;
+      callback();
+    }
+    else{
+      this.timer = setTimeout(callback, this.interval);
+    }
+  };
+
+  ns.Throttle = Throttle;
+  global.canvasNamespace = ns;
+})(this, document, jQuery, this.canvasNamespace);
+
+(function(global, doc, $, ns, undefined) {
+	'use strict';
+	ns = ns || {};
+
+  var originalConstructor;
+  var	instance;
+
+	/*
+	*	@param {}
+	*	@return {undefined}
+	*/
+
+	function ResizeHandler(){
+    var that = this;
+    ns.EventDispatcher.call( that );
+ 	}
+
+  originalConstructor = ResizeHandler.prototype.constructor;
+  ResizeHandler.prototype = new ns.EventDispatcher();
+  ResizeHandler.prototype.constructor = originalConstructor;
+
+	ResizeHandler.prototype.setEvent = function(){
+		var that = this;
+		var throttle = new ns.Throttle(250);
+    var $wrapper = $( '#wrapper' );
+
+		$( window ).on('load resize', function(){
+			throttle.exec(function(){
+				that.fireEvent( 'RESIZE', that, $wrapper.width(), $wrapper.height() );
+			});
+		});
+	};
+
+  function getInstance(){
+    if (!instance) {
+      instance = new ResizeHandler();
+    }
+    return instance;
+  }
+
+  ns.ResizeHandler = {
+      getInstance: getInstance
+  };
+
+  global.canvasNamespace = ns;
+
+})(this, document, jQuery, this.canvasNamespace);
+
+(function(global, doc, $, ns, undefined) {
   'use strict';
   ns = ns || {};
 
-  var $canvas = $( 'canvas.first' );
+  var $canvas = $( '#canvas' );
+  var $win = $( window );
   var context;
-  var RECT_WIDTH = $canvas.width();
-  var RECT_HEIGHT = $canvas.height();
+  var RECT_WIDTH;
+  var RECT_HEIGHT;
   var INTERVAL = 10;
+  var HISTORY_LENGTH = 30;
 
   $(function() {
     var ellipse = [];
     var ellipse_count = -1;
-    var i;
-    var compared_i;
-    var comparing_x;
-    var comparing_y;
-    var comparing_radius;
-    var compared_x;
-    var compared_y;
-    var compared_radius;
+
+    var that_i;
+    var that_x;
+    var that_y;
+    var that_r;
+
+    var this_x;
+    var this_y;
+    var this_r;
+
     var tmp;
+    var distance;
+    var i;
+    var resizeHandler = ns.ResizeHandler.getInstance();
 
     if ( !$canvas.get( 0 ).getContext ) return;
-
     context = $canvas.get( 0 ).getContext( '2d' );
-
-    // init
-    createEllipse();
 
     $canvas.on( 'mousedown', function( event ){
       ellipse[ ellipse_count ].x = event.clientX;
@@ -40,67 +189,93 @@
 
     $canvas.on( 'mouseup', function(){
       ellipse[ ellipse_count ].is_mousedown = false;
-      createEllipse();
+      createNextEllipse();
     });
 
-    function createEllipse(){
+    resizeHandler.addEventListener( 'RESIZE', function(){
+      setSize();
+    } );
+
+    // init
+    createNextEllipse();
+    resizeHandler.setEvent();
+
+    function createNextEllipse(){
       ellipse_count += 1;
-      ellipse[ ellipse_count ] = new Ellipse();
+      ellipse.push( new Ellipse() );
+    }
+
+    function collisionDetection( this_i ){
+      for ( that_i = this_i + 1; that_i < ellipse_count; that_i++ ){
+        this_x = ellipse[ i ].x;
+        this_y = ellipse[ i ].y;
+        this_r = ellipse[ i ].r;
+
+        that_x = ellipse[ that_i ].x;
+        that_y = ellipse[ that_i ].y;
+        that_r = ellipse[ that_i ].r;
+
+        distance = ( this_x - that_x ) * ( this_x - that_x ) + ( this_y - that_y ) * ( this_y - that_y ); 
+
+        if ( distance <= ( this_r + that_r ) * ( this_r + that_r ) ){
+          tmp = ellipse[ this_i ].velX; 
+          ellipse[ this_i ].velX = ellipse[ that_i ].velX;
+          ellipse[ that_i ].velX = tmp;
+          tmp = ellipse[ this_i ].velY; 
+          ellipse[ this_i ].velY = ellipse[ that_i ].velY;
+          ellipse[ that_i ].velY = tmp;
+        }
+      }
     }
 
     function update(){
       resetCanvas();
       ellipse[ ellipse_count ].increaseSize();
 
-      for ( i = 0; i < ellipse_count; i++ ){ // should be tryied by one liner
+      for ( i = 0; i < ellipse_count; i++ ){
         ellipse[ i ].move();
-        // collision detection of each balls
-        for ( compared_i = i + 1; compared_i < ellipse_count; compared_i++ ){
-          comparing_x = ellipse[ i ].x;
-          comparing_y = ellipse[ i ].y;
-          comparing_radius = ellipse[ i ].radius;
-          compared_x = ellipse[ compared_i ].x;
-          compared_y = ellipse[ compared_i ].y;
-          compared_radius = ellipse[ compared_i ].radius;
-
-          if ( comparing_x + comparing_radius > compared_x - compared_radius && 
-              comparing_x - comparing_radius < compared_x + compared_radius && 
-              comparing_y + comparing_radius > compared_y - compared_radius &&
-              comparing_y - comparing_radius < compared_y + compared_radius ){
-                tmp = ellipse[ i ].accX; 
-                ellipse[ i ].accX = ellipse[ compared_i ].accX;
-                ellipse[ compared_i ].accX = tmp;
-                tmp = ellipse[ i ].accY; 
-                ellipse[ i ].accY = ellipse[ compared_i ].accY;
-                ellipse[ compared_i ].accY = tmp;
-          }
-        }
+        collisionDetection( i );
       }
     }
 
-    setInterval( function(){
-      update();
-    }, INTERVAL );
+    setInterval( update, INTERVAL );
   });
+
+  function setSize(){
+    RECT_WIDTH = $win.width();
+    RECT_HEIGHT = $win.height();
+
+    $canvas.get( 0 ).width = RECT_WIDTH;
+    $canvas.get( 0 ).height = RECT_HEIGHT;
+  }
 
   // Ellipse Class
   function Ellipse(){
     var red = Math.floor( Math.random() * 255 );
     var green = Math.floor( Math.random() * 255 );
     var blue = Math.floor( Math.random() * 255 );
-    this.radius = 1;
+    var i;
+    this.r = 1;
     this.x = 0;
     this.y = 0;
-    this.accX = 0;
-    this.accY = 0;
-    this.color = 'rgb(' + red + ', ' + green + ', ' + blue + ')';
+    this.history_x = [];
+    this.history_y = [];
+    this.velX = 0;
+    this.velY = 0;
+    this.color = 'rgba(' + red + ', ' + green + ', ' + blue + ', ';
     this.is_mousedown = false;
+
+    for( i = 0; i < HISTORY_LENGTH; i++ ){
+      this.history_x.push( -255 );
+      this.history_y.push( -255 );
+    }
   }
 
   Ellipse.prototype.increaseSize = function(){
     if ( !this.is_mousedown ) return;
 
-    this.radius += 1;
+    this.r += 1;
+    this.savePosition();
     this.draw();
   };
 
@@ -108,37 +283,49 @@
     var FIX_NUM = 5;
     if ( !this.is_mousedown ) return;
 
-    this.accX = ( x - this.x ) / FIX_NUM;
-    this.accY = ( y - this.y ) / FIX_NUM;
+    this.velX = ( x - this.x ) / FIX_NUM;
+    this.velY = ( y - this.y ) / FIX_NUM;
     this.x = x;
     this.y = y;
   };
 
   Ellipse.prototype.move = function(){
+    this.savePosition();
     this.draw();
-    this.x += this.accX;
-    this.y += this.accY;
-    if ( this.x - this.radius < 0 || this.x + this.radius > RECT_WIDTH ){
-      this.accX = -this.accX;
+
+    this.x += this.velX;
+    this.y += this.velY;
+    if ( this.x - this.r < 0 || this.x + this.r > RECT_WIDTH ){
+      this.velX = -this.velX;
     }
-    if ( this.y - this.radius < 0 || this.y + this.radius > RECT_HEIGHT ){
-      this.accY = -this.accY;
+    if ( this.y - this.r < 0 || this.y + this.r > RECT_HEIGHT ){
+      this.velY = -this.velY;
     }
   };
 
+  Ellipse.prototype.savePosition = function(){
+    // save the current position to history
+    this.history_x.splice( 0, 1 );
+    this.history_x.push( this.x );
+    this.history_y.splice( 0, 1 );
+    this.history_y.push( this.y );
+  };
+
   Ellipse.prototype.draw = function(){
-    context.beginPath();
-    context.arc( this.x, this.y, this.radius, 0, Math.PI * 2, true );
-    context.fillStyle = this.color; 
-    context.fill();
+    var i;
+    var alpha;
+    for( i = HISTORY_LENGTH - 1; i >= 0; i-- ){
+      alpha = 0.1 * ( i + 1 );
+      context.beginPath();
+      context.arc( this.history_x[ i ], this.history_y[ i ], this.r, 0, Math.PI * 2, true );
+      context.fillStyle = this.color + alpha + ')'; 
+      context.fill();
+    }
   };
   //////////////////////////////////////
 
   function resetCanvas(){
-    context.rect( 0, 0, RECT_WIDTH, RECT_HEIGHT );
-    context.fillStyle = 'rgb(255, 255, 255)';
-    context.fill();
+    context.clearRect( 0, 0, RECT_WIDTH, RECT_HEIGHT );
   }
 
-  global.namespace = ns;
-})(this, document, jQuery, this.namespace);
+})(this, document, jQuery, this.canvasNamespace);
